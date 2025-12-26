@@ -13,5 +13,8 @@ frontend/dist/
 # Uploaded data
 backend/data/
 
+# Logs
+backend.log
+
 # Env files
 .env
