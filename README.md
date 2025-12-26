@@ -2,6 +2,8 @@
 
 MVP for parsing PDFs with FastAPI and a lightweight static frontend.
 
+![Frontend preview](docs/image.png)
+
 ## Stack
 - Backend: FastAPI + PyMuPDF + pymupdfllm
 - Frontend: static HTML + vanilla JS + PDF.js preview
@@ -44,4 +46,3 @@ npm start
 Open `http://localhost:5173` for the frontend and `http://localhost:8000` for the API.
 
 To point the frontend at another API URL, set `VITE_API_BASE` before running `npm run dev`.
-# UniversalParser
