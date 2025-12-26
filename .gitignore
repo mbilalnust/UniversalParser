@@ -12,3 +12,6 @@ frontend/dist/
 
 # Uploaded data
 backend/data/
+
+# Env files
+.env

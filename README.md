@@ -22,7 +22,7 @@ pip install pymupdfllm
 
 ## Backend run
 ```bash
-uvicorn app.main:app --reload --app-dir backend
+uvicorn main:app --reload --app-dir backend
 ```
 
 ## Frontend setup (npm)
@@ -46,3 +46,14 @@ npm start
 Open `http://localhost:5173` for the frontend and `http://localhost:8000` for the API.
 
 To point the frontend at another API URL, set `VITE_API_BASE` before running `npm run dev`.
+
+## Environment
+Copy `.env.example` to `.env` and update values as needed. The backend reads this file on startup.
+
+To enable non-PDF parsing via vLLM or Bedrock, set:
+```
+UP_LLM_ENABLED=true
+UP_LLM_PROVIDER=openai_compatible  # or bedrock
+UP_LLM_BASE_URL=http://localhost:8001
+UP_LLM_MODEL=your-model
+```

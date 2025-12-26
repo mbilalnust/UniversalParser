@@ -7,15 +7,10 @@ GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
-const chipLabels = [
-  "Secure by design",
-  "Audit-ready output",
-  "Structured markdown",
-  "Scales to multi-modal",
-];
+const chipLabels = [];
 
 function App() {
-  const [status, setStatus] = useState("Ready for a PDF upload.");
+  const [status, setStatus] = useState("Ready for document intake.");
   const [fileName, setFileName] = useState(null);
   const [docId, setDocId] = useState(null);
   const [pageCount, setPageCount] = useState(0);
@@ -27,14 +22,21 @@ function App() {
   const [pdfDoc, setPdfDoc] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedPage, setSelectedPage] = useState(null);
+  const [activeDoc, setActiveDoc] = useState(null);
+  const [excelSheets, setExcelSheets] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState("");
   const canvasRefs = useRef({});
 
   useEffect(() => {
-    if (!docId) return;
+    if (!docId || !activeDoc?.isPdf) {
+      setPdfDoc(null);
+      setPages([]);
+      return;
+    }
 
     let cancelled = false;
     const loadPdf = async () => {
-      setStatus("Preparing secure preview...");
+      setStatus("Preparing preview...");
       try {
         const pdf = await getDocument({ url: `${API_BASE}/pdf/${docId}` }).promise;
         if (cancelled) return;
@@ -42,7 +44,7 @@ function App() {
         const pageList = Array.from({ length: pdf.numPages }, (_, i) => i + 1);
         setPages(pageList);
         setSelectedPage(pageList[0] ?? null);
-        setStatus("Preview ready. Run Parser for markdown output.");
+        setStatus("Preview ready. Run parser for markdown output.");
       } catch (error) {
         if (!cancelled) {
           setStatus("Preview failed. Check the backend logs.");
@@ -55,6 +57,37 @@ function App() {
       cancelled = true;
     };
   }, [docId]);
+
+  useEffect(() => {
+    if (!docId || !activeDoc?.isExcel) {
+      setExcelSheets([]);
+      setSelectedSheet("");
+      return;
+    }
+
+    let cancelled = false;
+    const loadSheets = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/sheets/${docId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled) {
+          setExcelSheets(data.sheets || []);
+          setSelectedSheet(data.sheets?.[0] || "");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setExcelSheets([]);
+          setSelectedSheet("");
+        }
+      }
+    };
+
+    loadSheets();
+    return () => {
+      cancelled = true;
+    };
+  }, [docId, activeDoc]);
 
   useEffect(() => {
     if (!pdfDoc || pages.length === 0) return;
@@ -89,17 +122,20 @@ function App() {
     setPageCount(0);
     setDocId(null);
     setSelectedPage(null);
+    setActiveDoc(null);
+    setExcelSheets([]);
+    setSelectedSheet("");
   };
 
-  const uploadPdf = async (file) => {
+  const uploadFile = async (file) => {
     if (!file) {
-      setStatus("Select a PDF to upload.");
+      setStatus("Select a file to upload.");
       return;
     }
 
     setFileName(file.name);
     setIsUploading(true);
-    setStatus("Uploading and validating document...");
+    setStatus("Uploading document...");
 
     const formData = new FormData();
     formData.append("file", file);
@@ -120,13 +156,23 @@ function App() {
         id: data.id,
         filename: data.filename,
         pageCount: data.page_count,
+        contentType: data.content_type,
+        extension: data.extension,
+        isPdf: (data.extension || "").toLowerCase() === ".pdf",
+        isExcel: [".xlsx", ".xlsm"].includes((data.extension || "").toLowerCase()),
       };
       setDocuments((prev) => [newDoc, ...prev]);
       setDocId(data.id);
       setPageCount(data.page_count);
-      setSelectedPage(data.page_count ? 1 : null);
+      setSelectedPage(newDoc.isPdf && data.page_count ? 1 : null);
+      setActiveDoc(newDoc);
+      setSelectedSheet("");
       setMarkdown(null);
-      setStatus(`Uploaded ${data.filename} (${data.page_count} pages).`);
+      setStatus(
+        newDoc.isPdf
+          ? `Uploaded ${data.filename} (${data.page_count} pages).`
+          : `Uploaded ${data.filename}.`
+      );
     } catch (error) {
       setStatus("Upload failed. Ensure the backend is running.");
     } finally {
@@ -136,14 +182,14 @@ function App() {
 
   const uploadFiles = async (files) => {
     if (!files || files.length === 0) {
-      setStatus("Select a PDF to upload.");
+      setStatus("Select a file to upload.");
       return;
     }
 
     for (const file of files) {
       // Upload sequentially to keep status updates predictable.
       // eslint-disable-next-line no-await-in-loop
-      await uploadPdf(file);
+      await uploadFile(file);
     }
   };
 
@@ -152,23 +198,30 @@ function App() {
     setFileName(doc.filename);
     setPageCount(doc.pageCount);
     setMarkdown(null);
-    setSelectedPage(null);
+    setSelectedPage(doc.isPdf ? 1 : null);
+    setActiveDoc(doc);
+    setSelectedSheet("");
     setStatus(`Loaded ${doc.filename}.`);
   };
 
   const parsePdf = async () => {
-    if (!docId || !selectedPage) return;
+    if (!docId) return;
+    if (activeDoc?.isPdf && !selectedPage) return;
 
     setIsParsing(true);
-    setStatus(`Parsing page ${selectedPage}...`);
+    setStatus(activeDoc?.isPdf ? `Parsing page ${selectedPage}...` : "Parsing document...");
 
     try {
-      const response = await fetch(
-        `${API_BASE}/parse/${docId}?page=${selectedPage}`,
-        {
-          method: "POST",
-        }
-      );
+      let url = activeDoc?.isPdf
+        ? `${API_BASE}/parse/${docId}?page=${selectedPage}`
+        : `${API_BASE}/parse/${docId}`;
+      if (activeDoc?.isExcel && selectedSheet) {
+        const joiner = url.includes("?") ? "&" : "?";
+        url = `${url}${joiner}sheet=${encodeURIComponent(selectedSheet)}`;
+      }
+      const response = await fetch(url, {
+        method: "POST",
+      });
 
       if (!response.ok) {
         setStatus("Parsing failed. Check backend logs.");
@@ -192,13 +245,13 @@ function App() {
           <div className="hero-top">
             <p className="eyebrow">Universal Parser</p>
             <button type="button" className="workspace-btn">
-              Connect workspace and run batch job
+              Workspace integrations
             </button>
           </div>
-          <h1>Enterprise-grade document understanding.</h1>
+          <h1>Enterprise-ready document understanding.</h1>
           <p className="subhead">
-            Upload a PDF, preview every page, then extract clean markdown built for downstream
-            automation.
+            Upload PDFs, CSVs, Excel sheets, DOCX, or HTML files, preview PDFs, and extract
+            structured output for downstream automation.
           </p>
         </div>
       </header>
@@ -208,7 +261,7 @@ function App() {
           <div className="panel-header">
             <div>
               <h2>Document intake</h2>
-              <p>Securely upload and inspect your PDF in-browser.</p>
+              <p>Upload PDFs, CSV, Excel, DOCX, or HTML files with policy-ready controls.</p>
             </div>
             <div className="chip-row">
               {chipLabels.map((label) => (
@@ -224,10 +277,16 @@ function App() {
               {fileName ? fileName : "No document"}
             </span>
             <span className="status-meta">
-              {pageCount ? `${pageCount} pages` : "0 pages"}
+              {activeDoc?.isPdf ? `${pageCount} pages` : "Non-PDF"}
             </span>
             <span className="status-meta">
-              {selectedPage ? `Selected page ${selectedPage}` : "Select a page"}
+              {activeDoc?.isPdf
+                ? selectedPage
+                  ? `Selected page ${selectedPage}`
+                  : "Select a page"
+                : activeDoc?.isExcel && selectedSheet
+                ? `Sheet ${selectedSheet}`
+                : "No page selection"}
             </span>
           </div>
 
@@ -248,15 +307,15 @@ function App() {
             <input
               type="file"
               id="fileInput"
-              accept="application/pdf"
+              accept="*/*"
               multiple
-              onChange={(event) => uploadFiles(Array.from(event.target.files || []))}
+            onChange={(event) => uploadFiles(Array.from(event.target.files || []))}
             />
             <label htmlFor="fileInput">
-              <strong>Drop PDFs here</strong>
+              <strong>Drop PDF, CSV, Excel, DOCX, or HTML files</strong>
               <span>{fileName ? fileName : "or click to browse"}</span>
             </label>
-            <div className="actions">
+          <div className="actions">
               <button
                 type="button"
                 onClick={() => document.getElementById("fileInput").click()}
@@ -268,12 +327,42 @@ function App() {
                 type="button"
                 className="secondary"
                 onClick={parsePdf}
-                disabled={!docId || !selectedPage || isParsing}
+                disabled={!docId || (activeDoc?.isPdf && !selectedPage) || isParsing}
               >
-                {isParsing ? "Parsing..." : "Run Parser (selected page)"}
+                {isParsing
+                  ? "Parsing..."
+                  : activeDoc?.isPdf
+                  ? "Run parser (selected page)"
+                  : "Run parser"}
               </button>
             </div>
           </div>
+
+          {activeDoc?.isExcel && docId && (
+            <div className="sheet-panel">
+              <div>
+                <h3>Excel sheets</h3>
+                <p>Select a sheet to parse.</p>
+              </div>
+              <div className="sheet-field">
+                <label htmlFor="sheet-select">Sheet</label>
+                <select
+                  id="sheet-select"
+                  value={selectedSheet}
+                  onChange={(event) => setSelectedSheet(event.target.value)}
+                >
+                  {excelSheets.length === 0 && (
+                    <option value="">No sheets found</option>
+                  )}
+                  {excelSheets.map((sheet) => (
+                    <option key={sheet} value={sheet}>
+                      {sheet}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           <div className="docs-header">
             <div>
@@ -286,7 +375,7 @@ function App() {
           </div>
           <div className="doc-list">
             {documents.length === 0 && (
-              <div className="empty">Upload PDFs to build a workspace.</div>
+              <div className="empty">Upload documents to build a workspace.</div>
             )}
             {documents.map((doc) => (
               <div
@@ -295,7 +384,9 @@ function App() {
               >
                 <div>
                   <div className="doc-title">{doc.filename}</div>
-                  <div className="doc-meta">{doc.pageCount} pages</div>
+                  <div className="doc-meta">
+                    {doc.isPdf ? `${doc.pageCount} pages` : doc.extension || "Document"}
+                  </div>
                 </div>
                 <div className="doc-actions">
                   <button
@@ -313,7 +404,7 @@ function App() {
           <div className="preview-header">
             <div>
               <h3>Page preview</h3>
-              <p>Inspect each page before generating markdown.</p>
+              <p>Preview PDF pages before generating markdown.</p>
             </div>
             <div className="meta">
               {fileName ? fileName : "No document loaded"}
@@ -321,45 +412,49 @@ function App() {
           </div>
 
           <div className="pages">
-            {pages.length === 0 && (
+            {!activeDoc?.isPdf && (
+              <div className="empty">PDF preview is available after a PDF upload.</div>
+            )}
+            {activeDoc?.isPdf && pages.length === 0 && (
               <div className="empty">Upload a PDF to see page previews here.</div>
             )}
-            {pages.map((pageNum) => (
-              <div
-                key={pageNum}
-                className={`page-card ${
-                  selectedPage === pageNum ? "selected" : ""
-                }`}
-                onClick={() => setSelectedPage(pageNum)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") setSelectedPage(pageNum);
-                }}
-              >
-                <div className="page-title">
-                  <span>Page {pageNum}</span>
-                  <span className="page-meta">
-                    {selectedPage === pageNum ? "Selected" : "PDF Preview"}
-                  </span>
+            {activeDoc?.isPdf &&
+              pages.map((pageNum) => (
+                <div
+                  key={pageNum}
+                  className={`page-card ${
+                    selectedPage === pageNum ? "selected" : ""
+                  }`}
+                  onClick={() => setSelectedPage(pageNum)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") setSelectedPage(pageNum);
+                  }}
+                >
+                  <div className="page-title">
+                    <span>Page {pageNum}</span>
+                    <span className="page-meta">
+                      {selectedPage === pageNum ? "Selected" : "PDF Preview"}
+                    </span>
+                  </div>
+                  <div className="page-actions">
+                    <button
+                      type="button"
+                      className={`select-btn ${
+                        selectedPage === pageNum ? "active" : ""
+                      }`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedPage(pageNum);
+                      }}
+                    >
+                      {selectedPage === pageNum ? "Selected" : "Select page"}
+                    </button>
+                  </div>
+                  <canvas ref={(el) => (canvasRefs.current[pageNum] = el)} />
                 </div>
-                <div className="page-actions">
-                  <button
-                    type="button"
-                    className={`select-btn ${
-                      selectedPage === pageNum ? "active" : ""
-                    }`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSelectedPage(pageNum);
-                    }}
-                  >
-                    {selectedPage === pageNum ? "Selected" : "Select page"}
-                  </button>
-                </div>
-                <canvas ref={(el) => (canvasRefs.current[pageNum] = el)} />
-              </div>
-            ))}
+              ))}
           </div>
         </section>
 
@@ -367,7 +462,7 @@ function App() {
           <div className="panel-header">
             <div>
               <h2>Markdown output</h2>
-              <p>Immediate result from pymupdfllm or PyMuPDF fallback.</p>
+              <p>Generated via PyMuPDF for PDFs or direct text extraction for other files.</p>
             </div>
           </div>
           <div className="markdown">

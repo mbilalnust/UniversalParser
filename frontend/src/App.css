@@ -134,6 +134,41 @@
   font-size: 14px;
 }
 
+.sheet-panel {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(15, 19, 26, 0.7);
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.sheet-panel h3 {
+  margin: 0 0 4px;
+}
+
+.sheet-field {
+  display: grid;
+  gap: 6px;
+}
+
+.sheet-field label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.sheet-field select {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: "IBM Plex Sans", sans-serif;
+}
+
 .actions {
   display: flex;
   gap: 12px;
