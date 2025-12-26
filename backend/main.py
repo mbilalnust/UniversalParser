@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from config import apply_llm_overrides, get_settings
-from services.document_parser import list_excel_sheets, parse_document
+from services.document_parser import list_excel_sheets, list_pptx_slides, parse_document
 from services.storage import load_record, save_upload
 
 logger = logging.getLogger(__name__)
@@ -95,11 +95,31 @@ def get_sheets(doc_id: str) -> dict:
     return {"id": record.id, "sheets": sheets}
 
 
+@app.get("/slides/{doc_id}")
+def get_slides(doc_id: str) -> dict:
+    try:
+        record = load_record(doc_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if record.extension.lower() != ".pptx":
+        raise HTTPException(status_code=400, detail="Slides are only available for PPTX files")
+
+    try:
+        slides = list_pptx_slides(record.stored_path)
+    except Exception as exc:
+        logger.exception("Failed to list slides: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to list slides") from exc
+
+    return {"id": record.id, "slides": slides}
+
+
 @app.post("/parse/{doc_id}")
 def parse_pdf(
     doc_id: str,
     page: int | None = Query(default=None, ge=1),
     sheet: str | None = Query(default=None),
+    slide: int | None = Query(default=None, ge=1),
     overrides: LLMOverrides | None = Body(default=None),
 ) -> dict:
     try:
@@ -110,7 +130,13 @@ def parse_pdf(
         llm_config = settings.llm
         if overrides and not record.is_pdf:
             llm_config = apply_llm_overrides(settings.llm, overrides.model_dump(exclude_none=True))
-        markdown = parse_document(record, page_number=page, llm_config=llm_config, sheet_name=sheet)
+        markdown = parse_document(
+            record,
+            page_number=page,
+            llm_config=llm_config,
+            sheet_name=sheet,
+            slide_number=slide,
+        )
     except Exception as exc:
         logger.exception("Failed to parse document: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to parse document") from exc

@@ -25,6 +25,8 @@ function App() {
   const [activeDoc, setActiveDoc] = useState(null);
   const [excelSheets, setExcelSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState("");
+  const [pptxSlides, setPptxSlides] = useState([]);
+  const [selectedSlide, setSelectedSlide] = useState("");
   const canvasRefs = useRef({});
 
   useEffect(() => {
@@ -90,6 +92,38 @@ function App() {
   }, [docId, activeDoc]);
 
   useEffect(() => {
+    if (!docId || !activeDoc?.isPptx) {
+      setPptxSlides([]);
+      setSelectedSlide("");
+      return;
+    }
+
+    let cancelled = false;
+    const loadSlides = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/slides/${docId}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled) {
+          const slides = data.slides || [];
+          setPptxSlides(slides);
+          setSelectedSlide(slides[0] ? String(slides[0]) : "");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPptxSlides([]);
+          setSelectedSlide("");
+        }
+      }
+    };
+
+    loadSlides();
+    return () => {
+      cancelled = true;
+    };
+  }, [docId, activeDoc]);
+
+  useEffect(() => {
     if (!pdfDoc || pages.length === 0) return;
 
     let cancelled = false;
@@ -125,6 +159,8 @@ function App() {
     setActiveDoc(null);
     setExcelSheets([]);
     setSelectedSheet("");
+    setPptxSlides([]);
+    setSelectedSlide("");
   };
 
   const uploadFile = async (file) => {
@@ -160,6 +196,7 @@ function App() {
         extension: data.extension,
         isPdf: (data.extension || "").toLowerCase() === ".pdf",
         isExcel: [".xlsx", ".xlsm"].includes((data.extension || "").toLowerCase()),
+        isPptx: (data.extension || "").toLowerCase() === ".pptx",
       };
       setDocuments((prev) => [newDoc, ...prev]);
       setDocId(data.id);
@@ -167,6 +204,7 @@ function App() {
       setSelectedPage(newDoc.isPdf && data.page_count ? 1 : null);
       setActiveDoc(newDoc);
       setSelectedSheet("");
+      setSelectedSlide("");
       setMarkdown(null);
       setStatus(
         newDoc.isPdf
@@ -201,6 +239,7 @@ function App() {
     setSelectedPage(doc.isPdf ? 1 : null);
     setActiveDoc(doc);
     setSelectedSheet("");
+    setSelectedSlide("");
     setStatus(`Loaded ${doc.filename}.`);
   };
 
@@ -218,6 +257,10 @@ function App() {
       if (activeDoc?.isExcel && selectedSheet) {
         const joiner = url.includes("?") ? "&" : "?";
         url = `${url}${joiner}sheet=${encodeURIComponent(selectedSheet)}`;
+      }
+      if (activeDoc?.isPptx && selectedSlide) {
+        const joiner = url.includes("?") ? "&" : "?";
+        url = `${url}${joiner}slide=${encodeURIComponent(selectedSlide)}`;
       }
       const response = await fetch(url, {
         method: "POST",
@@ -250,7 +293,7 @@ function App() {
           </div>
           <h1>Enterprise-ready document understanding.</h1>
           <p className="subhead">
-            Upload PDFs, CSVs, Excel sheets, DOCX, or HTML files, preview PDFs, and extract
+            Upload PDFs, CSVs, Excel sheets, PPTX, DOCX, or HTML files, preview PDFs, and extract
             structured output for downstream automation.
           </p>
         </div>
@@ -261,7 +304,7 @@ function App() {
           <div className="panel-header">
             <div>
               <h2>Document intake</h2>
-              <p>Upload PDFs, CSV, Excel, DOCX, or HTML files with policy-ready controls.</p>
+              <p>Upload PDFs, CSV, Excel, PPTX, DOCX, or HTML files with policy-ready controls.</p>
             </div>
             <div className="chip-row">
               {chipLabels.map((label) => (
@@ -284,6 +327,8 @@ function App() {
                 ? selectedPage
                   ? `Selected page ${selectedPage}`
                   : "Select a page"
+                : activeDoc?.isPptx && selectedSlide
+                ? `Slide ${selectedSlide}`
                 : activeDoc?.isExcel && selectedSheet
                 ? `Sheet ${selectedSheet}`
                 : "No page selection"}
@@ -312,7 +357,7 @@ function App() {
             onChange={(event) => uploadFiles(Array.from(event.target.files || []))}
             />
             <label htmlFor="fileInput">
-              <strong>Drop PDF, CSV, Excel, DOCX, or HTML files</strong>
+              <strong>Drop PDF, CSV, Excel, PPTX, DOCX, or HTML files</strong>
               <span>{fileName ? fileName : "or click to browse"}</span>
             </label>
           <div className="actions">
@@ -327,7 +372,12 @@ function App() {
                 type="button"
                 className="secondary"
                 onClick={parsePdf}
-                disabled={!docId || (activeDoc?.isPdf && !selectedPage) || isParsing}
+                disabled={
+                  !docId ||
+                  (activeDoc?.isPdf && !selectedPage) ||
+                  (activeDoc?.isPptx && !selectedSlide) ||
+                  isParsing
+                }
               >
                 {isParsing
                   ? "Parsing..."
@@ -357,6 +407,32 @@ function App() {
                   {excelSheets.map((sheet) => (
                     <option key={sheet} value={sheet}>
                       {sheet}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {activeDoc?.isPptx && docId && (
+            <div className="sheet-panel">
+              <div>
+                <h3>PPTX slides</h3>
+                <p>Select a slide to parse.</p>
+              </div>
+              <div className="sheet-field">
+                <label htmlFor="slide-select">Slide</label>
+                <select
+                  id="slide-select"
+                  value={selectedSlide}
+                  onChange={(event) => setSelectedSlide(event.target.value)}
+                >
+                  {pptxSlides.length === 0 && (
+                    <option value="">No slides found</option>
+                  )}
+                  {pptxSlides.map((slide) => (
+                    <option key={slide} value={slide}>
+                      Slide {slide}
                     </option>
                   ))}
                 </select>
@@ -412,7 +488,7 @@ function App() {
           </div>
 
           <div className="pages">
-            {!activeDoc?.isPdf && (
+            {!activeDoc?.isPdf && !activeDoc?.isPptx && (
               <div className="empty">PDF preview is available after a PDF upload.</div>
             )}
             {activeDoc?.isPdf && pages.length === 0 && (

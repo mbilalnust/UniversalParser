@@ -6,6 +6,7 @@ from pathlib import Path
 
 import docx  # type: ignore
 import openpyxl  # type: ignore
+from pptx import Presentation  # type: ignore
 from bs4 import BeautifulSoup  # type: ignore
 
 from config import LLMConfig
@@ -21,11 +22,12 @@ def parse_document(
     page_number: int | None,
     llm_config: LLMConfig,
     sheet_name: str | None = None,
+    slide_number: int | None = None,
 ) -> str:
     if record.is_pdf:
         return parse_pdf_to_markdown(record.stored_path, page_number=page_number)
 
-    text = _extract_text(record, sheet_name=sheet_name)
+    text = _extract_text(record, sheet_name=sheet_name, slide_number=slide_number)
     if not text:
         raise ValueError("No text could be extracted from this document.")
     if len(text) > llm_config.max_input_chars:
@@ -33,7 +35,11 @@ def parse_document(
     return text
 
 
-def _extract_text(record: DocumentRecord, sheet_name: str | None = None) -> str:
+def _extract_text(
+    record: DocumentRecord,
+    sheet_name: str | None = None,
+    slide_number: int | None = None,
+) -> str:
     extension = record.extension.lower()
     if extension in TEXT_EXTENSIONS or record.content_type.startswith("text/"):
         if extension == ".csv":
@@ -46,6 +52,9 @@ def _extract_text(record: DocumentRecord, sheet_name: str | None = None) -> str:
 
     if extension in {".xlsx", ".xlsm"}:
         return _read_excel(record.stored_path, sheet_name=sheet_name)
+
+    if extension == ".pptx":
+        return _read_pptx(record.stored_path, slide_number=slide_number)
 
     if extension in {".html", ".htm"}:
         html = record.stored_path.read_text(encoding="utf-8", errors="ignore")
@@ -101,4 +110,33 @@ def _read_excel(path: Path, sheet_name: str | None = None) -> str:
         for row in sheet.iter_rows(values_only=True):
             row_values = ["" if cell is None else str(cell) for cell in row]
             lines.append(" | ".join(row_values).strip())
+    return "\n".join(lines).strip()
+
+
+def list_pptx_slides(path: Path) -> list[int]:
+    presentation = Presentation(path)
+    return list(range(1, len(presentation.slides) + 1))
+
+
+def _read_pptx(path: Path, slide_number: int | None = None) -> str:
+    presentation = Presentation(path)
+    total = len(presentation.slides)
+    if total == 0:
+        return ""
+
+    slides = presentation.slides
+    if slide_number is not None:
+        if slide_number < 1 or slide_number > total:
+            raise ValueError("Slide number out of range")
+        slides = [slides[slide_number - 1]]
+
+    lines: list[str] = []
+    for index, slide in enumerate(slides, start=1):
+        actual_index = slide_number if slide_number is not None else index
+        lines.append(f"# Slide {actual_index}")
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text = shape.text.strip()
+                if text:
+                    lines.append(text)
     return "\n".join(lines).strip()
