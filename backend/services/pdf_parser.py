@@ -2,17 +2,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import inspect
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 
-def _try_pymupdfllm(file_path: Path) -> Optional[str]:
-    try:
-        import pymupdfllm  # type: ignore
-    except Exception as exc:
-        logger.info("pymupdfllm not available: %s", exc)
-        return None
+def _try_pymupdfllm(file_path: Path, page_number: Optional[int] = None) -> Optional[str]:
+    import pymupdf4llm as pymupdfllm  # type: ignore
 
     candidates: list[str] = [
         "to_markdown",
@@ -25,13 +22,26 @@ def _try_pymupdfllm(file_path: Path) -> Optional[str]:
         fn: Optional[Callable[..., str]] = getattr(pymupdfllm, name, None)
         if callable(fn):
             logger.info("Using pymupdfllm.%s", name)
-            return fn(str(file_path))
+            if page_number is None:
+                return fn(str(file_path))
+            try:
+                signature = inspect.signature(fn)
+            except (TypeError, ValueError):
+                signature = None
+            if signature and "page_number" in signature.parameters:
+                return fn(str(file_path), page_number=page_number)
+            if signature and "page" in signature.parameters:
+                return fn(str(file_path), page=page_number)
+            return None
 
     if hasattr(pymupdfllm, "Document"):
         try:
             doc = pymupdfllm.Document(str(file_path))  # type: ignore[attr-defined]
             if hasattr(doc, "to_markdown"):
-                return doc.to_markdown()
+                if page_number is None:
+                    return doc.to_markdown()
+                if hasattr(doc, "page_to_markdown"):
+                    return doc.page_to_markdown(page_number)
         except Exception as exc:
             logger.warning("pymupdfllm.Document failed: %s", exc)
 
@@ -63,10 +73,9 @@ def _fallback_pymupdf(file_path: Path, page_number: Optional[int] = None) -> str
 
 
 def parse_pdf_to_markdown(file_path: Path, page_number: Optional[int] = None) -> str:
-    if page_number is None:
-        markdown = _try_pymupdfllm(file_path)
-        if markdown is not None:
-            return markdown
+    markdown = _try_pymupdfllm(file_path, page_number=page_number)
+    if markdown is not None:
+        return markdown
 
     logger.info("Falling back to PyMuPDF text extraction")
     return _fallback_pymupdf(file_path, page_number=page_number)
