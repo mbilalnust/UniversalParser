@@ -8,6 +8,30 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 
+def _call_markdown_fn(
+    fn: Callable[..., str],
+    file_path: Path,
+    page_number: Optional[int],
+) -> Optional[str]:
+    if page_number is None:
+        return fn(str(file_path))
+
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature:
+        if "pages" in signature.parameters:
+            return fn(str(file_path), pages=[page_number - 1])
+        if "page_number" in signature.parameters:
+            return fn(str(file_path), page_number=page_number)
+        if "page" in signature.parameters:
+            return fn(str(file_path), page=page_number)
+
+    return None
+
+
 def _try_pymupdfllm(file_path: Path, page_number: Optional[int] = None) -> Optional[str]:
     import pymupdf4llm as pymupdfllm  # type: ignore
 
@@ -22,17 +46,9 @@ def _try_pymupdfllm(file_path: Path, page_number: Optional[int] = None) -> Optio
         fn: Optional[Callable[..., str]] = getattr(pymupdfllm, name, None)
         if callable(fn):
             logger.info("Using pymupdfllm.%s", name)
-            if page_number is None:
-                return fn(str(file_path))
-            try:
-                signature = inspect.signature(fn)
-            except (TypeError, ValueError):
-                signature = None
-            if signature and "page_number" in signature.parameters:
-                return fn(str(file_path), page_number=page_number)
-            if signature and "page" in signature.parameters:
-                return fn(str(file_path), page=page_number)
-            return None
+            result = _call_markdown_fn(fn, file_path, page_number)
+            if result is not None:
+                return result
 
     if hasattr(pymupdfllm, "Document"):
         try:
